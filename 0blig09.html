@@ -27,8 +27,142 @@
   </head>
   <body>
   <script type="module" defer>
-      import { world } from "./simpleWorld.js";
-      import * as THREE from "three";
+  import { world } from "./simpleWorld.js";
+  import * as THREE from "three";
+  import { GUI } from "dat.GUI";
+
+      // Pyramid geometry
+  let pyramid = null; // exposed so GUI/animation can access it
+  (function createPyramid() {
+        // Pyramid with square base centered at origin and apex above
+        const geometry = new THREE.BufferGeometry();
+
+        // 5 vertices: 4 base corners and 1 apex
+        const half = 2;
+        const vertices = new Float32Array([
+          -half, 0, -half, // 0: back-left
+           half, 0, -half, // 1: back-right
+           half, 0,  half, // 2: front-right
+          -half, 0,  half, // 3: front-left
+           0.0, 3.5, 0.0,  // 4: apex
+        ]);
+
+        // Indices for the 4 triangular sides and 2 triangles for the square base
+        const indices = [
+          4, 0, 1, // side 1
+          4, 1, 2, // side 2
+          4, 2, 3, // side 3
+          4, 3, 0, // side 4
+          0, 2, 1, // base tri 1 (flipped so base faces down)
+          0, 3, 2, // base tri 2
+        ];
+
+        geometry.setIndex(indices);
+        geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+        geometry.computeVertexNormals();
+
+  // Material and mesh (opaque, solid)
+  const mat = new THREE.MeshStandardMaterial({ color: '#FF8C00', metalness: 0.1, roughness: 0.6, transparent: false, opacity: 1.0, side: THREE.DoubleSide });
+  pyramid = new THREE.Mesh(geometry, mat);
+  pyramid.castShadow = true;
+  pyramid.position.set(0, 0, 0);
+  world.scene.add(pyramid);
+
+  // Add an outline (edges) to make faces more visible
+  const edgesGeo = new THREE.EdgesGeometry(geometry);
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0x000000, linewidth: 1 });
+  const outline = new THREE.LineSegments(edgesGeo, edgeMat);
+  outline.renderOrder = 999; // draw on top
+  pyramid.add(outline);
+  // expose outline for GUI control
+  pyramid.userData.outline = outline;
+
+        // Add a directional light to cast a shadow for better shape perception
+        const dir = new THREE.DirectionalLight('#FFFFFF', 1.0);
+        dir.position.set(10, 20, 10);
+        dir.castShadow = true;
+        dir.shadow.mapSize.width = 1024;
+        dir.shadow.mapSize.height = 1024;
+        dir.shadow.camera.near = 0.5;
+        dir.shadow.camera.far = 100;
+        world.scene.add(dir);
+      })();
+
+      // Rotation controls (global/world axes) and GUI
+      (function setupRotationControls() {
+        const params = {
+          xSpeed: 0.6, // radians per second
+          ySpeed: 0.8,
+          zSpeed: 0.4,
+          xEnabled: true,
+          yEnabled: true,
+          zEnabled: true,
+          reset: () => {
+            if (pyramid) pyramid.quaternion.set(0, 0, 0, 1);
+          },
+        };
+
+  const gui = new GUI();
+        const f = gui.addFolder('Rotation (rad/s)');
+        f.add(params, 'xSpeed', -3.14, 3.14, 0.01).name('X speed');
+        f.add(params, 'xEnabled').name('Enable X');
+        f.add(params, 'ySpeed', -3.14, 3.14, 0.01).name('Y speed');
+        f.add(params, 'yEnabled').name('Enable Y');
+        f.add(params, 'zSpeed', -3.14, 3.14, 0.01).name('Z speed');
+        f.add(params, 'zEnabled').name('Enable Z');
+        f.add(params, 'reset').name('Reset orientation');
+        f.open();
+
+        // Outline controls
+        const outlineFolder = gui.addFolder('Outline');
+        const outlineParams = {
+          visible: true,
+          color: '#000000',
+        };
+        outlineFolder.add(outlineParams, 'visible').name('Visible').onChange((v) => {
+          if (pyramid && pyramid.userData.outline) pyramid.userData.outline.visible = v;
+        });
+        outlineFolder.addColor(outlineParams, 'color').name('Color').onChange((c) => {
+          if (pyramid && pyramid.userData.outline) pyramid.userData.outline.material.color.set(c);
+        });
+        outlineFolder.open();
+
+        // Keep some reusable objects to avoid allocations every frame
+        const qx = new THREE.Quaternion();
+        const qy = new THREE.Quaternion();
+        const qz = new THREE.Quaternion();
+        const vx = new THREE.Vector3(1, 0, 0);
+        const vy = new THREE.Vector3(0, 1, 0);
+        const vz = new THREE.Vector3(0, 0, 1);
+
+        // Use THREE.Clock and requestAnimationFrame for framerate-independent animation
+        const clock = new THREE.Clock();
+        const worldXAxis = new THREE.Vector3(1, 0, 0);
+        const worldYAxis = new THREE.Vector3(0, 1, 0);
+        const worldZAxis = new THREE.Vector3(0, 0, 1);
+
+        function animate() {
+          const deltaTime = clock.getDelta(); // seconds since last frame
+
+          if (pyramid) {
+            if (params.xEnabled && params.xSpeed !== 0) {
+              pyramid.rotateOnWorldAxis(worldXAxis, params.xSpeed * deltaTime);
+            }
+            if (params.yEnabled && params.ySpeed !== 0) {
+              pyramid.rotateOnWorldAxis(worldYAxis, params.ySpeed * deltaTime);
+            }
+            if (params.zEnabled && params.zSpeed !== 0) {
+              pyramid.rotateOnWorldAxis(worldZAxis, params.zSpeed * deltaTime);
+            }
+          }
+
+          requestAnimationFrame(animate);
+          world.renderer.render(world.scene, world.camera);
+        }
+
+        // start the animation loop
+        animate();
+      })();
 
       document.body.appendChild(world.renderer.domElement);
     </script>
