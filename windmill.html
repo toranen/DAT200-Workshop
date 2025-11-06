@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Windmill GLTF Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+        }
+    </style>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "./lib/three.js-master/build/three.module.js",
+                "GLTFLoader": "./lib/three.js-master/examples/jsm/loaders/GLTFLoader.js",
+                "OrbitControls": "./lib/three.js-master/examples/jsm/controls/OrbitControls.js",
+                "dat.GUI": "./lib/dat.gui/dat.gui.module.js"
+            }
+        }
+    </script>
+</head>
+<body>
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'GLTFLoader';
+        import { OrbitControls } from 'OrbitControls';
+        import { GUI } from 'dat.GUI';
+
+        // Scene setup
+        const scene = new THREE.Scene();
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        document.body.appendChild(renderer.domElement);
+
+        // Camera and controls
+        camera.position.set(2, 1.5, 2);
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.target.set(0, 0.5, 0);
+        controls.update();
+
+        // Lighting setup for balanced illumination
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambientLight);
+
+        // Main directional light (front)
+        const frontLight = new THREE.DirectionalLight(0xffffff, 0.7);
+        frontLight.position.set(5, 5, 5);
+        frontLight.castShadow = true;
+        frontLight.shadow.mapSize.width = 2048;
+        frontLight.shadow.mapSize.height = 2048;
+        frontLight.shadow.camera.near = 0.1;
+        frontLight.shadow.camera.far = 100;
+        frontLight.shadow.camera.left = -20;
+        frontLight.shadow.camera.right = 20;
+        frontLight.shadow.camera.top = 20;
+        frontLight.shadow.camera.bottom = -20;
+        scene.add(frontLight);
+
+        // Back fill light
+        const backLight = new THREE.DirectionalLight(0xffffff, 0.5);
+        backLight.position.set(-5, 3, -5);
+        backLight.castShadow = true;
+        scene.add(backLight);
+
+        // Side fill light
+        const fillLight = new THREE.DirectionalLight(0xffffff, 0.3);
+        fillLight.position.set(10, 4, -5);
+        fillLight.castShadow = false;
+        scene.add(fillLight);
+
+        // Ground plane (larger)
+        const groundGeometry = new THREE.PlaneGeometry(50, 50);
+        const groundMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x999999,
+            roughness: 0.8,
+            metalness: 0.2
+        });
+        const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+        ground.rotation.x = -Math.PI / 2;
+        ground.receiveShadow = true;
+        scene.add(ground);
+
+        // Load GLTF model
+        const loader = new GLTFLoader();
+        loader.load(
+                        './vindmølleV3.glb',  // Path to your GLTF file
+            function (gltf) {
+                const model = gltf.scene;
+                
+                // Debug: Print full model structure
+                console.log('Full model structure:');
+                function printModelStructure(object, indent = '') {
+                    console.log(`${indent}${object.name} (${object.type})`);
+                    if (object.children) {
+                        object.children.forEach(child => {
+                            printModelStructure(child, indent + '  ');
+                        });
+                    }
+                }
+                printModelStructure(model);
+                
+                // Also print all meshes directly
+                console.log('All meshes in model:');
+                model.traverse((node) => {
+                    if (node.isMesh) {
+                        console.log(`Mesh found: "${node.name}" (parent: "${node.parent?.name}")`);
+                        node.castShadow = true;
+                        node.receiveShadow = true;
+                    }
+                });
+                
+                // Center and scale the model
+                const box = new THREE.Box3().setFromObject(model);
+                const center = box.getCenter(new THREE.Vector3());
+                model.position.sub(center);
+                model.position.y = 0; // Place on ground
+                
+                // Scale down to 1/5 size
+                model.scale.set(0.2, 0.2, 0.2);
+                
+                // Rotate 180 degrees around Y axis
+                model.rotation.y = Math.PI;
+
+                // Debug: Log model structure
+                console.log('Model structure:');
+                model.traverse((child) => {
+                    if (child.isMesh || child.isObject3D) {
+                        console.log(`Name: ${child.name}, Type: ${child.type}, Path: ${child.parent ? child.parent.name : 'root'}`);
+                    }
+                });
+
+                // Find the propeller/blade part - look for specific parts
+                let propeller = null;
+                model.traverse((child) => {
+                    // Debug each potential match
+                    if (child.isMesh) {
+                        console.log('Checking mesh:', child.name);
+                    }
+                    
+                    // Look for the specific blade mesh or its parent
+                    if (child.name === 'blades' || 
+                        child.name === 'Cube.001_0' || 
+                        child.name.toLowerCase().includes('blade') || 
+                        child.name.toLowerCase().includes('vinge')) {
+                        console.log('Found potential blade part:', child.name);
+                        propeller = child;
+                    }
+                });
+
+                // Store reference to the propeller
+                if (propeller) {
+                    console.log('Using part for rotation:', propeller.name);
+                    model.userData.propeller = propeller;
+                } else {
+                    model.userData.propeller = model;
+                }
+
+                scene.add(model);
+            },
+            function (xhr) {
+                console.log((xhr.loaded / xhr.total * 100) + '% loaded');
+            },
+            function (error) {
+                console.error('An error happened:', error);
+            }
+        );
+
+        // Handle window resize
+        window.addEventListener('resize', onWindowResize, false);
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // Setup GUI controls for windmill blade rotation
+        const params = {
+            rotationSpeed: 1.0,
+            autoRotate: true
+        };
+
+        const gui = new GUI();
+        gui.add(params, 'rotationSpeed', -5, 5, 0.1).name('Blade Speed');
+        gui.add(params, 'autoRotate').name('Auto Rotate');
+
+        // Setup clock for smooth rotation
+        const clock = new THREE.Clock();
+        let frame = 0;  // For debugging output
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update windmill blade rotation
+            if (params.autoRotate) {
+                const delta = clock.getDelta();
+                // Find the Sphere (blades) in the scene
+                scene.traverse((object) => {
+                    if (object.name === 'Sphere') {
+                        // Rotate blades around Z axis (adjust this axis if needed)
+                        object.rotation.z += params.rotationSpeed * delta;
+                    }
+                });
+            }
+            
+            controls.update();
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
